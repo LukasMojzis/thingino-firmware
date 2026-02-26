@@ -1,0 +1,23 @@
+{
+  "image":{
+    "sharpness":0,
+    "sinter_strength":0,
+    "temper_strength":0
+  },
+  "sensor":{
+    "fps": 30,
+    "height": 1440,
+    "i2c_address": 41,
+    "min_fps": 5,
+    "model": "gc4023",
+    "width": 2880
+  },
+  "stream0":{
+    "height": 1080,
+    "width": 1920
+  },
+  "stream1":{
+    "height": 360,
+    "width": 640
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "gpio": {
+    "button_reset": 62,
+    "ir850": {
+      "active_low": false,
+      "active_on_boot": false,
+      "pin": 82
+    },
+    "ircut": "49 50",
+    "led_b": {
+      "active_low": false,
+      "active_on_boot": true,
+      "pin": 79
+    },
+    "led_r": {
+      "active_low": false,
+      "active_on_boot": false,
+      "pin": 80
+    },
+    "white": {
+      "active_low": false,
+      "active_on_boot": false,
+      "pin": 81
+    }
+  }
+}
+
+
+
+
+
+
