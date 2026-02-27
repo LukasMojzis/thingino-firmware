@@ -6,10 +6,10 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2
 USER_ID := $(shell id -u)
 GROUP_ID := $(shell id -g)
 USERNAME := builder
-DL_DIR := dl
 
 # Directories
 WORKSPACE_DIR := $(shell pwd)
+DL_DIR := dl
 
 # Container run command
 ifeq ($(findstring podman,$(CONTAINER_ENGINE)),podman)
