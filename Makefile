@@ -18,6 +18,7 @@ BR2_EXTERNAL := $(CURDIR)
 SCRIPTS_DIR := $(BR2_EXTERNAL)/scripts
 BUILDROOT_DIR := $(BR2_EXTERNAL)/buildroot
 BUILDROOT_OVERRIDE_PATCH_DIR := $(BR2_EXTERNAL)/package/all-patches/buildroot
+BUILDROOT_OVERRIDE_PATCH_FILES = $(sort $(wildcard $(BUILDROOT_OVERRIDE_PATCH_DIR)/*.patch))
 
 # Run dependency check before doing anything, but skip if WORKFLOW=1 or if .prereqs.done exists
 ifeq ($(WORKFLOW),)
@@ -441,21 +442,7 @@ update:
 	git submodule init
 	git submodule update
 	@echo "=== APPLYING BUILDROOT OVERRIDES ==="
-	@if [ -d "$(BUILDROOT_OVERRIDE_PATCH_DIR)" ]; then \
-		for patch in $$(find "$(BUILDROOT_OVERRIDE_PATCH_DIR)" -maxdepth 1 -type f -name '*.patch' | LC_ALL=C sort); do \
-			if git -C "$(BUILDROOT_DIR)" apply --check "$$patch"; then \
-				echo "Applying $$patch"; \
-				git -C "$(BUILDROOT_DIR)" apply "$$patch"; \
-			elif git -C "$(BUILDROOT_DIR)" apply -R --check "$$patch"; then \
-				echo "Already applied: $$patch"; \
-			else \
-				echo "ERROR: failed to apply $$patch"; \
-				exit 1; \
-			fi; \
-		done; \
-	else \
-		echo "No buildroot override patch directory: $(BUILDROOT_OVERRIDE_PATCH_DIR)"; \
-	fi
+	$(MAKE) apply-buildroot-overrides
 	@echo "=== CHECKING EXTERNAL TOOLCHAIN BUNDLES ==="
 	BR2_DL_DIR=$(BR2_DL_DIR) \
 		$(SCRIPTS_DIR)/update_toolchain_bundles.sh
@@ -489,12 +476,14 @@ build_fast: $(U_BOOT_ENV_TXT)
 
 # Configuration dependency files
 CONFIG_DEPS_FILE = $(OUTPUT_DIR)/.config.deps
+BUILDROOT_OVERRIDE_STAMP = $(OUTPUT_DIR)/.buildroot-overrides.stamp
 CONFIG_INPUT_FILES = $(TOOLCHAIN_FRAGMENT_FILE) $(CONFIG_FRAGMENT_FILES) $(CAMERA_CONFIG_REAL)
 CONFIG_INPUT_FILES += $(THINGINO_USER_FRAGMENT_FILES)
 ifneq ($(wildcard $(BR2_EXTERNAL)/local.mk),)
 CONFIG_INPUT_FILES += $(BR2_EXTERNAL)/local.mk
 endif
 CONFIG_INPUT_FILES += $(THINGINO_USER_MK_FILES)
+CONFIG_INPUT_FILES += $(BUILDROOT_OVERRIDE_STAMP)
 
 # Function to check if configuration needs regeneration
 define config_needs_regen
@@ -512,8 +501,42 @@ $(shell \
 )
 endef
 
+# Apply Buildroot override patches after submodule updates. This keeps a plain
+# `git pull --recurse-submodules` from leaving Buildroot without local Kconfig
+# symbols used by Thingino fragments.
+.PHONY: apply-buildroot-overrides
+apply-buildroot-overrides: buildroot/Makefile $(OUTPUT_DIR)/.keep
+	@$(TEAL) "$@"
+	@changed=0; \
+	stamp_needs_update=0; \
+	if [ ! -f "$(BUILDROOT_OVERRIDE_STAMP)" ]; then \
+		stamp_needs_update=1; \
+	fi; \
+	if [ -d "$(BUILDROOT_OVERRIDE_PATCH_DIR)" ]; then \
+		for patch in $(BUILDROOT_OVERRIDE_PATCH_FILES); do \
+			if [ "$$patch" -nt "$(BUILDROOT_OVERRIDE_STAMP)" ]; then \
+				stamp_needs_update=1; \
+			fi; \
+			if git -C "$(BUILDROOT_DIR)" apply --check "$$patch" >/dev/null 2>&1; then \
+				echo "Applying $$patch"; \
+				git -C "$(BUILDROOT_DIR)" apply "$$patch"; \
+				changed=1; \
+			elif git -C "$(BUILDROOT_DIR)" apply -R --check "$$patch" >/dev/null 2>&1; then \
+				echo "Already applied: $$patch"; \
+			else \
+				echo "ERROR: failed to apply $$patch"; \
+				exit 1; \
+			fi; \
+		done; \
+	else \
+		echo "No buildroot override patch directory: $(BUILDROOT_OVERRIDE_PATCH_DIR)"; \
+	fi; \
+	if [ "$$changed" = "1" ] || [ "$$stamp_needs_update" = "1" ]; then \
+		touch "$(BUILDROOT_OVERRIDE_STAMP)"; \
+	fi
+
 # Smart configuration check - only regenerate if needed
-check-config: buildroot/Makefile
+check-config: buildroot/Makefile apply-buildroot-overrides
 	@$(TEAL) "$@"
 	@if [ "$(call config_needs_regen)" = "yes" ]; then \
 		echo "Configuration files have changed, regenerating .config"; \
@@ -523,8 +546,13 @@ check-config: buildroot/Makefile
 	fi
 
 # Force configuration regeneration
-force-config: buildroot/Makefile $(OUTPUT_DIR)/.keep $(CONFIG_PARTITION_DIR)/.keep
+force-config: buildroot/Makefile apply-buildroot-overrides $(OUTPUT_DIR)/.keep $(CONFIG_PARTITION_DIR)/.keep
 	@$(TEAL) "$@"
+	@if [ -f "$(OUTPUT_DIR)/.config" ] && [ "$(BUILDROOT_OVERRIDE_STAMP)" -nt "$(OUTPUT_DIR)/.config" ]; then \
+		echo "Buildroot overrides changed; removing stale package and toolchain-wrapper artifacts"; \
+		rm -rf "$(OUTPUT_DIR)/build" "$(OUTPUT_DIR)/per-package" "$(OUTPUT_DIR)/host" \
+			"$(OUTPUT_DIR)/staging" "$(OUTPUT_DIR)/target" "$(OUTPUT_DIR)/images"; \
+	fi
 	# delete older config
 	$(info * remove existing .config file)
 	rm -rvf $(OUTPUT_DIR)/.config
@@ -631,7 +659,7 @@ show-config-deps:
 
 clean-config:
 	@$(TEAL) "$@"
-	rm -f $(OUTPUT_DIR)/.config $(CONFIG_DEPS_FILE) $(OUTPUT_DIR)/.config_original
+	rm -f $(OUTPUT_DIR)/.config $(CONFIG_DEPS_FILE) $(BUILDROOT_OVERRIDE_STAMP) $(OUTPUT_DIR)/.config_original
 
 # call configurator
 menuconfig: check-config $(OUTPUT_DIR)/.config
